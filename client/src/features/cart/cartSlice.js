@@ -3,7 +3,7 @@ import cartService from './cartService';
 
 const initialState = {
 
-    cartItems: [],
+    cartItems: null,
     cartLoading: false,
     cartSuccess: false,
     cartError: false,
@@ -85,6 +85,23 @@ const cartSlice = createSlice({
                 state.cartError = true
                 state.cartErrorMessage = action.payload
             })
+            .addCase(createOrder.pending, (state, action) => {
+                state.cartLoading = true
+                state.cartSuccess = false
+                state.cartError = false
+            })
+            .addCase(createOrder.fulfilled, (state, action) => {
+                state.cartLoading = false
+                state.cartSuccess = true
+                state.cartItems = []
+                state.cartError = false
+            })
+            .addCase(createOrder.rejected, (state, action) => {
+                state.cartLoading = false
+                state.cartSuccess = false
+                state.cartError = true
+                state.cartErrorMessage = action.payload
+            })
     }
 });
 
@@ -140,6 +157,20 @@ export const updateCart = createAsyncThunk("CART/CART_ITEM", async (cartDetails,
 
     try {
         return await cartService.updateItemFromCart(cartDetails, token)
+    } catch (error) {
+        const message = error.response.data.message
+        return thunkAPI.rejectWithValue(message)
+    }
+
+})
+
+
+// CREATE_ORDER
+export const createOrder = createAsyncThunk("ORDER/ADD", async (couponCode, thunkAPI) => {
+    let token = thunkAPI.getState().auth.user.token
+
+    try {
+        return await cartService.placeOrder({ couponCode: couponCode }, token)
     } catch (error) {
         const message = error.response.data.message
         return thunkAPI.rejectWithValue(message)

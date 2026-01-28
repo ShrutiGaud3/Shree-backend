@@ -19,8 +19,11 @@ function Home() {
 
     useEffect(() => {
 
-        dispatch(getProducts())
-        dispatch(getProductShops())
+        if (!productError) {
+            dispatch(getProducts())
+            dispatch(getProductShops())
+        }
+
         if (user) {
             dispatch(getCart())
         }

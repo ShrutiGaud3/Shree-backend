@@ -19,7 +19,7 @@ export default function ProductDetails() {
     const { pid } = useParams()
 
 
-    let isEligibleForCart = cartItems.products.length === 0 ? true : product?.shop?._id === cartItems?.products[0]?.product?.shop
+    let isEligibleForCart = cartItems?.products?.length === 0 ? true : product?.shop?._id === cartItems?.products[0]?.product?.shop
 
 
 

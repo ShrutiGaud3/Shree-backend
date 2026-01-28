@@ -1,9 +1,11 @@
 import { Trash2, Plus, Minus, ShoppingCart, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
-import { deleteItemFromCart, getCart, updateCart } from "../features/cart/cartSlice"
+import { createOrder, deleteItemFromCart, getCart, updateCart } from "../features/cart/cartSlice"
 import LoadingScreen from "../components/LoadingScreen"
 import { toast } from "react-toastify"
+import axios from "axios"
+import { useNavigate } from "react-router-dom"
 
 
 export default function CartPage() {
@@ -12,52 +14,62 @@ export default function CartPage() {
     const { cartItems, cartLoading, cartError, cartErrorMessage } = useSelector(state => state.cart)
 
     const dispatch = useDispatch()
+    const navigate = useNavigate()
+
+    let shopId = cartItems ? cartItems?.products[0]?.product?.shop : null
 
 
 
+    const [coupon, setCoupon] = useState("")
     const [isPaymentOpen, setIsPaymentOpen] = useState(false)
     const [couponCode, setCouponCode] = useState("")
     const [couponApplied, setCouponApplied] = useState(false)
     const [couponError, setCouponError] = useState("")
 
     const subtotal = cartItems?.products?.reduce((acc, product) => product.product.price * product.qty + acc, 0)
-    const discount = 10
+    const discount = couponApplied ? coupon.couponDiscount * subtotal / 100 : 0
     const total = subtotal - discount
 
 
+    // Remove Item
     const handleRemoveItemFromCart = (pid) => {
         dispatch(deleteItemFromCart(pid))
     }
 
+    // Update Cart
     const handleUpdateCart = (cartDetails) => {
-
         dispatch(updateCart(cartDetails))
-
     }
 
 
-    const handleApplyCoupon = () => {
-        setCouponError("")
-        if (!couponCode.trim()) {
-            setCouponError("Please enter a coupon code")
-            return
-        }
+    // Apply Coupon
+    const handleApplyCoupon = async () => {
 
-        // Mock validation - in real app, validate with backend
-        if (couponCode.toUpperCase() === "SAVE10") {
-            setCouponApplied(true)
-            setCouponError("")
+        if (!shopId) {
+            toast.error("Please Add Items In Your Cart")
         } else {
-            setCouponError("Invalid coupon code")
-            setCouponApplied(false)
+            try {
+                const response = await axios.post("/api/coupons/apply", { couponCode: couponCode, shopId: shopId })
+                setCoupon(response.data)
+                setCouponApplied(true)
+            } catch (error) {
+                setCouponError(error.response.data.message)
+            }
         }
+
     }
 
+    // Remove Coupon
     const handleRemoveCoupon = () => {
-        setCouponCode("")
         setCouponApplied(false)
-        setCouponError("")
     }
+
+    // Place Order
+    const handlePlaceOrder = (coupon) => {
+        dispatch(createOrder(coupon))
+        // navigate("/auth/profile")
+    }
+
 
 
     useEffect(() => {
@@ -81,6 +93,19 @@ export default function CartPage() {
     }
 
 
+    if (!cartItems || cartItems.products.length === 0) {
+        return (
+            <div className="mb-8 min-h-[60vh] p-8">
+                <h1 className="text-4xl font-bold text-gray-900 flex items-center gap-2">
+                    <ShoppingCart size={32} className="text-teal-600" />
+                    Shopping Cart
+                </h1>
+                <p className="text-gray-600 mt-2">{0} items in your cart</p>
+            </div>
+        )
+    }
+
+
     return (
         <div className="min-h-screen bg-white">
             {/* Header */}
@@ -91,7 +116,7 @@ export default function CartPage() {
                         <ShoppingCart size={32} className="text-teal-600" />
                         Shopping Cart
                     </h1>
-                    <p className="text-gray-600 mt-2">{cartItems.length} items in your cart</p>
+                    <p className="text-gray-600 mt-2">{cartItems?.length || 0} items in your cart</p>
                 </div>
 
                 <div className="grid lg:grid-cols-3 gap-8">
@@ -306,7 +331,7 @@ export default function CartPage() {
 
                             {/* Buttons */}
                             <div className="space-y-3">
-                                <button className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200">
+                                <button onClick={() => handlePlaceOrder(couponCode)} className="w-full bg-teal-600 hover:bg-teal-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors duration-200">
                                     Pay ₹{total}
                                 </button>
                                 <button

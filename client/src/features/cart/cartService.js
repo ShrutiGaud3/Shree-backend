@@ -52,8 +52,23 @@ const updateItemFromCart = async (cartDetails, token) => {
 
 }
 
+const placeOrder = async (couponCode, token) => {
 
-const cartService = { addToCart, fetchCart, removeItemFromCart, updateItemFromCart }
+
+
+    let options = {
+        headers: {
+            authorization: `Bearer ${token}`
+        }
+    }
+
+    const response = await axios.post("/api/orders", couponCode, options)
+    return response.data
+
+}
+
+
+const cartService = { addToCart, fetchCart, removeItemFromCart, updateItemFromCart, placeOrder }
 
 
 export default cartService
