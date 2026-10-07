@@ -1,16 +1,32 @@
-# React + Vite
+# Shree Client — Toys & Jewellery Storefront
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React 19 + Vite 7 + Tailwind v4 + React Router 7 + Axios. No Redux — auth lives in
+`src/context/AuthContext.jsx`, data is fetched per-page with loading/error states.
 
-Currently, two official plugins are available:
+## Run
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```bash
+npm install
+npm run dev      # vite on :5173, /api proxied to http://localhost:8080 (vite.config.js)
+npm run build    # production bundle
+```
 
-## React Compiler
+Backend must be running (`npm run dev` in repo root) with a working `MONGO_URI`.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Structure
 
-## Expanding the ESLint configuration
+- `src/config/site.js` — `STORE_NAME`, categories, sort options, order timeline (only place the name lives)
+- `src/index.css` — brand palette as CSS vars + Tailwind v4 `@theme` tokens (no hex in components)
+- `src/api/client.js` — axios instance (JWT, 401 → login), `loadRazorpay()` for checkout.js
+- `src/components/` — `Layout` (text-logo header + footer), `Guards` (Protected/AdminOnly),
+  `ProductCard`, `ui` primitives (Loader, ErrorState, Stars, Price, fields, buttons)
+- `src/pages/` — Home, Products, ProductDetail, Cart, Checkout, Orders, OrderDetail,
+  Login, Register, ForgotPassword, ResetPassword, Chat, Account, Legal (Privacy, Terms, Refunds, Shipping, Contact)
+- `src/pages/admin/` — Dashboard, Products (multipart upload), Orders (transition buttons),
+  Coupons, Users (block/unblock)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Checkout flow
+
+COD: address → coupon → place order. Prepaid: same, then Razorpay checkout.js
+(`key` from `GET /api/payments/key`, `orderId` from `POST /api/orders`) →
+`POST /api/payments/verify`. Unpaid orders auto-cancel after 30 min; pay again from Order detail.
