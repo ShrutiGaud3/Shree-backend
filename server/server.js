@@ -1,69 +1,94 @@
-import express from "express"
-import dotenv from "dotenv"
-import colors from "colors"
-import { connectDB } from "./config/dbConfig.js"
+import express from "express";
+import dotenv from "dotenv";
+import colors from "colors";
+import helmet from "helmet";
+import cors from "cors";
+import pinoHttp from "pino-http";
+import { connectDB } from "./config/dbConfig.js";
+import { STORE_NAME } from "./config/storeConfig.js";
+import logger from "./utils/logger.js";
+import mongoose from "mongoose";
 
-dotenv.config()
+dotenv.config();
 
-// Local Imports
-import { errorHandler } from "./middleware/errorHandler.js"
-import authRoutes from "./routes/authRoutes.js"
-import adminRoutes from "./routes/adminRoutes.js"
-import shopOwnerRoutes from "./routes/shopOwnerRoutes.js"
-import productRoutes from "./routes/productRoutes.js"
-import cartRoutes from "./routes/cartRoutes.js"
-import orderRoutes from "./routes/orderRoutes.js"
-import shopRoutes from "./routes/shopRoutes.js"
-import couponRoutes from "./routes/couponRoutes.js"
-import chatBotRoutes from "./routes/chatBotRoutes.js"
+// Route imports (single-vendor: no shop / shop-owner routes)
+import { errorHandler } from "./middleware/errorHandler.js";
+import { notFound } from "./middleware/notFound.js";
+import { apiLimiter, authLimiter } from "./middleware/rateLimit.js";
+import authRoutes from "./routes/authRoutes.js";
+import adminRoutes from "./routes/adminRoutes.js";
+import productRoutes from "./routes/productRoutes.js";
+import cartRoutes from "./routes/cartRoutes.js";
+import orderRoutes from "./routes/orderRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
+import couponRoutes from "./routes/couponRoutes.js";
+import chatBotRoutes from "./routes/chatBotRoutes.js";
+import reviewRoutes from "./routes/reviewRoutes.js";
+import { startStaleOrderJob } from "./utils/staleOrders.js";
 
-const app = express()
-const PORT = process.env.PORT || 5000
+const app = express();
+const PORT = process.env.PORT || 5000;
 
-// DB Connection
-connectDB()
+// DB Connection (non-blocking; logs on failure)
+connectDB();
 
-// Body-Parser
-app.use(express.json())
-app.use(express.urlencoded())
+// Security + observability (Phase 2)
+app.use(helmet());
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(",") : true,
+    credentials: true,
+  })
+);
+app.use(pinoHttp({ logger }));
 
+// Razorpay webhook needs the RAW body for signature verification —
+// mount express.raw() on that exact path BEFORE the JSON parser.
+app.use("/api/payments/webhook", express.raw({ type: "application/json", limit: "100kb" }));
+
+// Body parsers with sane limits (fixes oversized-payload DoS)
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: true, limit: "100kb" }));
+
+// Rate limits
+app.use("/api/", apiLimiter);
+app.use("/api/auth", authLimiter);
 
 app.get("/", (req, res) => {
-    res.status(200)
-    res.json({
-        message: "WELCOME TO INDORE BAZAR API 1.00"
-    })
-})
+  res.status(200).json({ message: `WELCOME TO ${STORE_NAME.toUpperCase()} API 1.0` });
+});
 
+app.get("/api/health", (req, res) => {
+  const dbStates = ["disconnected", "connected", "connecting", "disconnecting"];
+  res.status(200).json({
+    success: true,
+    store: STORE_NAME,
+    status: "ok",
+    time: new Date().toISOString(),
+    uptimeSec: Math.round(process.uptime()),
+    db: dbStates[mongoose.connection.readyState] ?? "unknown",
+  });
+});
 
-// Auth Routes
-app.use("/api/auth", authRoutes)
+app.use("/api/auth", authRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/cart", cartRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/coupons", couponRoutes);
+app.use("/api/chat", chatBotRoutes);
+app.use("/api/reviews", reviewRoutes);
 
-// Admin Routes
-app.use("/api/admin", adminRoutes)
+// 404 + global error handler (must be last)
+app.use(notFound);
+app.use(errorHandler);
 
-// Shop Owner Routse
-app.use("/api/shop-owner", shopOwnerRoutes)
+app.listen(PORT, () => console.log(`SERVER IS RUNNING AT PORT : ${PORT}`.bgBlue.black));
 
-// Product Routes
-app.use("/api/products", productRoutes)
+// Auto-cancel stale unpaid prepaid orders + release their stock (Phase 4)
+if (process.env.DISABLE_STALE_ORDER_JOB !== "true") {
+  startStaleOrderJob();
+}
 
-// Cart Routes
-app.use("/api/cart", cartRoutes)
-
-// Order Routes
-app.use("/api/orders", orderRoutes)
-
-// Shop Routes
-app.use("/api/shops", shopRoutes)
-
-// Coupon Routes
-app.use("/api/coupons", couponRoutes)
-
-// Chat Bot Routes
-app.use("/api/chat", chatBotRoutes)
-
-// Error Handler
-app.use(errorHandler)
-
-app.listen(PORT, () => console.log(`SERVER IS RUNNING AT PORT : ${PORT}`.bgBlue.black))
+export default app;

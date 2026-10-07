@@ -1,122 +1,207 @@
-import Cart from "../models/cartModel.js"
-import Coupon from "../models/couponModel.js"
-import Order from "../models/orderModel.js"
+import Cart from "../models/cartModel.js";
+import Coupon from "../models/couponModel.js";
+import Order from "../models/orderModel.js";
+import { STORE_NAME, STORE_CONFIG } from "../config/storeConfig.js";
+import { reserveStock } from "../utils/stock.js";
+import { cancelOrderAndRelease } from "../utils/orderService.js";
+import { assertCouponUsable } from "../utils/coupon.js";
+import { notifyOrderStatus } from "../utils/orderEmails.js";
+import { createRazorpayOrder, isRazorpayConfigured } from "../utils/razorpay.js";
+
+// Checkout: totals always computed from DB prices (never trust frontend).
+// Stock is reserved atomically BEFORE the order is created; any failure
+// rolls back already-reserved lines (see utils/stock.js).
+// - COD: order placed immediately.
+// - Razorpay: order placed (pending) + Razorpay order created; client pays
+//   via checkout.js, then POST /api/payments/verify. Unpaid orders are
+//   auto-cancelled by the stale-order job (utils/staleOrders.js).
 
 const getMyOrders = async (req, res) => {
+  const userId = req.user._id;
+  const myOrders = await Order.find({ user: userId })
+    .populate("items.product")
+    .populate("coupon")
+    .sort({ createdAt: -1 })
+    .lean();
 
-    const userId = req.user._id
-
-    const myOrders = await Order.find({ user: userId }).populate('user').populate('products.product')
-
-    if (!myOrders) {
-        res.status(404)
-        throw new Error("Orders Not Found!")
-    }
-
-    res.status(200).json(myOrders)
-
-
-
-}
+  res.status(200).json(myOrders || []);
+};
 
 const getMyOrder = async (req, res) => {
-    const myOrder = await Order.findById(req.params.oid).populate("user").populate("shop").populate("products").populate("coupon")
+  // Ownership enforced: user can only fetch own orders (admin uses /api/admin/orders).
+  const myOrder = await Order.findOne({ _id: req.params.oid, user: req.user._id })
+    .populate("items.product")
+    .populate("coupon")
+    .lean();
 
-    if (!myOrder) {
-        res.status(404)
-        throw new Error("Order Not Found!")
+  if (!myOrder) {
+    res.status(404);
+    throw new Error("Order Not Found!");
+  }
+
+  res.status(200).json(myOrder);
+};
+
+const buildItemsFromCart = (cart) => {
+  let subtotal = 0;
+  const items = cart.items.map((item) => {
+    const p = item.product;
+    if (!p || !p.isActive) {
+      throw Object.assign(new Error("One of the products is unavailable"), { statusCode: 400 });
     }
-
-    res.status(200).json(myOrder)
-
-}
+    const unitPrice = item.variant?.price || p.price;
+    subtotal += unitPrice * item.qty;
+    const gstRate = p.gstRate ?? STORE_CONFIG.defaultGstRate;
+    const taxableAmount = unitPrice * item.qty;
+    const gstAmount = Math.round(((taxableAmount * gstRate) / 100) * 100) / 100;
+    return {
+      product: p._id,
+      variant: item.variant || undefined,
+      qty: item.qty,
+      unitPrice,
+      mrp: p.mrp,
+      gstRate,
+      gstAmount: gstAmount / item.qty,
+      taxableAmount: taxableAmount / item.qty,
+      productSnapshot: {
+        name: p.name,
+        images: p.images?.slice(0, 1) || [],
+        category: p.category,
+        subCategory: p.subCategory,
+      },
+    };
+  });
+  return { items, subtotal };
+};
 
 const createOrder = async (req, res) => {
+  const userId = req.user._id;
+  const { shippingAddress, couponCode, paymentMethod = "cod", customerNotes } = req.body;
 
-    const userId = req.user._id
+  if (!shippingAddress?.line1 || !shippingAddress?.city || !shippingAddress?.pincode) {
+    res.status(400);
+    throw new Error("Shipping address with line1, city and pincode is required");
+  }
 
-    let couponExists
+  if (!["cod", "razorpay"].includes(paymentMethod)) {
+    res.status(400);
+    throw new Error("Invalid payment method");
+  }
 
-    if (req.body.couponCode) {
-        // Find Coupon
-        couponExists = await Coupon.findOne({ couponCode: req.body.couponCode })
+  if (paymentMethod === "razorpay" && !isRazorpayConfigured()) {
+    res.status(503);
+    throw new Error("Online payments are not configured. Please choose COD.");
+  }
 
-        if (!couponExists) {
-            res.status(404)
-            throw new Error("Invalid Coupon")
-        }
+  const cart = await Cart.findOne({ user: userId }).populate("items.product");
+  if (!cart || cart.items.length === 0) {
+    res.status(404);
+    throw new Error("Cart is empty!");
+  }
 
+  const { items, subtotal } = buildItemsFromCart(cart);
+
+  // Coupon (store-wide, incl. per-user limits)
+  let coupon = null;
+  let couponDiscount = 0;
+  if (couponCode) {
+    coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true });
+    await assertCouponUsable(coupon, { orderValue: subtotal, userId });
+    couponDiscount = coupon.calculateDiscount(subtotal);
+  }
+
+  const totalTaxable = subtotal - couponDiscount;
+  const totalGst = items.reduce((s, i) => s + i.gstAmount * i.qty, 0);
+  const shippingFee = totalTaxable >= STORE_CONFIG.freeShippingThreshold ? 0 : STORE_CONFIG.shippingFee;
+  const totalAmount = Math.round((totalTaxable + totalGst + shippingFee) * 100) / 100;
+
+  if (paymentMethod === "cod" && totalAmount > STORE_CONFIG.codMaxOrderValue) {
+    res.status(400);
+    throw new Error(`COD allowed only below ₹${STORE_CONFIG.codMaxOrderValue}. Please pay online.`);
+  }
+
+  // Atomic stock reserve (rolls back on any line failure)
+  await reserveStock(items.map((i) => ({ product: i.product, variant: i.variant, qty: i.qty })));
+
+  const order = new Order({
+    user: userId,
+    items,
+    shippingAddress,
+    subtotal,
+    totalDiscount: couponDiscount,
+    totalTaxable,
+    totalGst,
+    shippingFee,
+    totalAmount,
+    coupon: coupon?._id || undefined,
+    couponCode: coupon?.code,
+    couponDiscount,
+    status: "placed",
+    payment: { method: paymentMethod, status: "pending", amount: totalAmount, currency: "INR" },
+    customerNotes,
+  });
+
+  try {
+    if (paymentMethod === "razorpay") {
+      const rzpOrder = await createRazorpayOrder({ amountInr: totalAmount, receipt: `shree_${Date.now()}` });
+      order.payment.razorpayOrderId = rzpOrder.id;
     }
 
+    await order.save();
 
-    // Find Cart
-    const cart = await Cart.findOne({ user: userId }).populate("products.product")
-
-
-    if (!cart) {
-        res.status(404)
-        throw new Error("Cart Not Found!")
+    if (coupon) {
+      await Coupon.findByIdAndUpdate(coupon._id, { $inc: { usedCount: 1 } }).exec();
     }
+  } catch (error) {
+    // Order could not be completed (e.g., Razorpay down) — give stock back.
+    const { releaseStock } = await import("../utils/stock.js");
+    await releaseStock(items.map((i) => ({ product: i.product, variant: i.variant, qty: i.qty })));
+    throw error;
+  }
 
-    let billedProducts = cart.products.map((product) => {
-        return {
-            product: product.product._id,
-            qty: product.qty,
-            purchasedPrice: product.product.price
-        }
-    })
+  await order.populate("items.product");
 
+  // Clear cart
+  cart.items = [];
+  await cart.save();
 
+  // Brand-styled confirmation email (fire-and-forget; never fails checkout)
+  notifyOrderStatus(order._id);
 
-    let totalBill = cart.products.reduce((acc, item) => {
-        return acc + item.product.price * item.qty
-    }, 0)
+  if (paymentMethod === "razorpay") {
+    return res.status(201).json({
+      order,
+      razorpay: {
+        orderId: order.payment.razorpayOrderId,
+        amount: totalAmount,
+        currency: "INR",
+        keyId: process.env.RAZORPAY_KEY_ID,
+        name: STORE_NAME,
+      },
+    });
+  }
 
-    let discount = couponExists ? totalBill * couponExists.couponDiscount / 100 : 0
-
-    let shop = cart.products[0].product.shop
-
-    const order = new Order({
-        user: userId,
-        products: billedProducts,
-        shop: shop,
-        status: "placed",
-        isDiscounted: couponExists ? true : false,
-        coupon: couponExists ? couponExists._id : null,
-        totalBillAmount: totalBill - discount
-    })
-
-    await order.populate("products.product")
-    await order.save()
-
-    if (!order) {
-        res.status(409)
-        throw new Error("Order Not Placed")
-    }
-
-    // Clear Cart
-    await cart.deleteOne({ user: userId })
-
-    res.status(201).json(order)
-
-}
-
+  res.status(201).json(order);
+};
 
 const cancelOrder = async (req, res) => {
+  // Ownership enforced
+  const order = await Order.findOne({ _id: req.params.oid, user: req.user._id });
 
-    const order = await Order.findById(req.params.oid)
+  if (!order) {
+    res.status(404);
+    throw new Error("Order Not Found!");
+  }
 
-    if (order.status === "placed") {
-        const cancelledOrder = await Order.findByIdAndUpdate(req.params.oid, { status: "cancelled" }, { new: true })
-        res.status(200).json(cancelledOrder)
-    } else {
-        res.status(409)
-        throw new Error("Order Cannot Be Cancelled! After Dispatched")
-    }
+  // Shared lifecycle: release stock + refund if paid online
+  await cancelOrderAndRelease(order, { by: req.user._id, reason: req.body?.reason || "" });
 
-}
+  // Brand-styled cancellation email (fire-and-forget)
+  notifyOrderStatus(order._id);
 
+  res.status(200).json(order);
+};
 
-const orderController = { getMyOrders, getMyOrder, createOrder, cancelOrder }
+const orderController = { getMyOrders, getMyOrder, createOrder, cancelOrder };
 
-export default orderController
+export default orderController;

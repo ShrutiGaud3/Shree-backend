@@ -1,12 +1,11 @@
-import express from "express"
-import protect from "../middleware/authMiddleware.js"
-import { getAnswer } from "../controllers/chatBotController.js"
+import express from "express";
+import protect from "../middleware/authMiddleware.js";
+import { getAnswer } from "../controllers/chatBotController.js";
+import { validate } from "../middleware/validate.js";
+import { chatSchema } from "../validators/schemas.js";
 
+const router = express.Router();
 
-const router = express.Router()
+router.post("/", protect.forAuthUsers, validate(chatSchema), getAnswer);
 
-
-router.post("/", protect.forAuthUsers, getAnswer)
-
-
-export default router
+export default router;

@@ -1,51 +1,37 @@
-import Coupon from "../models/couponModel.js"
+import Coupon from "../models/couponModel.js";
+import { assertCouponUsable } from "../utils/coupon.js";
+
+// Store-wide coupons (no shop scoping). Full usage-limit/per-user checks in Phase 5.
 
 const getCoupons = async (req, res) => {
+  const now = new Date();
+  const coupons = await Coupon.find({ isActive: true, startsAt: { $lte: now }, expiresAt: { $gte: now } })
+    .select("code description discountType discountValue maxDiscount minOrderValue applicableCategory expiresAt")
+    .lean();
+  res.status(200).json(coupons || []);
+};
 
-    let shopId = req.params.sid
-
-    const coupons = await Coupon.find({ shop: shopId })
-
-    if (!coupons) {
-        res.status(404)
-        throw new Error('Coupon Not Found!')
-    }
-
-    res.status(200).json(coupons)
-
-}
 const applyCoupon = async (req, res) => {
+  const { couponCode, orderValue = 0 } = req.body;
 
-    const { couponCode, shopId } = req.body
+  if (!couponCode) {
+    res.status(400);
+    throw new Error("Please send coupon code");
+  }
 
-    if (!couponCode || !shopId) {
-        res.status(409)
-        throw new Error("Please Send Coupon & Shop Id")
-    }
+  const couponExists = await Coupon.findOne({ code: couponCode.toUpperCase() });
 
-    const couponExists = await Coupon.findOne({ couponCode: couponCode })
+  await assertCouponUsable(couponExists, { orderValue: Number(orderValue) || 0, userId: req.user._id });
 
-    if (!couponExists) {
-        res.status(404)
-        throw new Error("Invalid Coupon")
-    }
+  res.status(200).json({
+    code: couponExists.code,
+    discountType: couponExists.discountType,
+    discountValue: couponExists.discountValue,
+    maxDiscount: couponExists.maxDiscount,
+    estimatedDiscount: couponExists.calculateDiscount(Number(orderValue) || 0),
+  });
+};
 
-    if (couponExists.shop.toString() !== shopId) {
-        res.status(409)
-        throw new Error("This Coupon Is Not Valid For This Shop")
-    }
+const couponController = { getCoupons, applyCoupon };
 
-
-    if (couponExists.isActive) {
-        res.status(200).json(couponExists)
-    } else {
-        res.status(409)
-        throw new Error("Expired Coupon")
-    }
-}
-
-
-const couponController = { getCoupons, applyCoupon }
-
-
-export default couponController
+export default couponController;

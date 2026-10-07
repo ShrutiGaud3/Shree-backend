@@ -1,11 +1,12 @@
 {
-  "name": "indore-bazar",
+  "name": "shree",
   "version": "1.0.0",
   "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "node --env-file=.env  --watch server/server.js"
+    "dev": "node --env-file=.env  --watch server/server.js",
+    "seed": "node server/seed.js"
   },
   "author": "",
   "license": "ISC",
@@ -15,10 +16,18 @@
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.8.0",
     "colors": "^1.4.0",
+    "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.20.0",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "nodemailer": "^10.0.15",
+    "pino": "^10.1.0",
+    "pino-http": "^11.0.0",
+    "razorpay": "^2.9.8",
+    "zod": "^4.1.0"
   }
 }
