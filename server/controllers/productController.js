@@ -2,7 +2,7 @@ import Product from "../models/productModel.js";
 import { STORE_CONFIG } from "../config/storeConfig.js";
 
 // Public catalog: GET /api/products?q=&category=&subCategory=&minPrice=&maxPrice=
-//   &ageGroup=&material=&sort=&page=&limit=
+//   &ageGroup=&material=&colour=&minRating=&inStock=&sort=&page=&limit=
 // Returns { items, page, totalPages, total }. Always .lean(), active only.
 
 const SORT_MAP = {
@@ -34,6 +34,23 @@ export const buildProductFilter = (query = {}) => {
 
   if (query.ageGroup) filter["toysFields.ageGroup"] = query.ageGroup;
   if (query.material) filter["jewelleryFields.material"] = query.material;
+
+  // Additive Feature 1: colour (case-insensitive exact), rating, availability.
+  // All optional — old clients that omit them get identical results.
+  if (query.colour) filter.colour = { $regex: `^${query.colour.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" };
+
+  const minRating = toNumberOrUndefined(query.minRating);
+  if (minRating !== undefined) filter.ratingAvg = { $gte: minRating };
+
+  if (query.inStock === "true") {
+    filter.$and = [...(filter.$and || []), { $or: [{ stock: { $gt: 0 } }, { "variants.stock": { $gt: 0 } }] }];
+  } else if (query.inStock === "false") {
+    filter.$and = [
+      ...(filter.$and || []),
+      { stock: { $lte: 0 } },
+      { "variants.stock": { $not: { $gt: 0 } } },
+    ];
+  }
 
   if (query.q) filter.$text = { $search: query.q };
 

@@ -105,6 +105,11 @@ const productSchema = new mongoose.Schema(
       index: true,
     },
     tags: [{ type: String, trim: true }],
+    colour: {
+      type: String,
+      trim: true,
+      maxlength: [30, "Colour cannot exceed 30 characters"],
+    },
     mrp: {
       type: Number,
       required: [true, "MRP is required"],
@@ -186,6 +191,8 @@ productSchema.index({ createdAt: -1 });
 productSchema.index({ ratingAvg: -1 });
 productSchema.index({ isActive: 1, category: 1, subCategory: 1 });
 productSchema.index({ isFeatured: 1, isActive: 1 });
+productSchema.index({ colour: 1 });
+productSchema.index({ stock: 1 });
 
 // Pre-validate: generate slug from name if not provided.
 // (Must be pre-validate, not pre-save: insertMany skips save hooks,

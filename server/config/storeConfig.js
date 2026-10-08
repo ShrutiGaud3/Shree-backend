@@ -7,6 +7,9 @@ export const STORE_CONFIG = {
   // Flat shipping fee when order is below threshold (in INR)
   shippingFee: 99,
 
+  // Fixed gift-wrap charge applied server-side when gift.isGift is true
+  giftWrapFee: 49,
+
   // COD allowed only below this order value (in INR)
   // High-value jewellery orders must be prepaid online
   codMaxOrderValue: 5000,

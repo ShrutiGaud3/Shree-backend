@@ -93,6 +93,7 @@ const baseProductFields = {
   brand: z.string().trim().max(50).optional(),
   sku: z.string().trim().min(2).max(40),
   tags: z.array(z.string().trim().max(30)).max(20).optional(),
+  colour: z.string().trim().max(30).optional(),
   mrp: z.number().min(0),
   price: z.number().min(0),
   stock: z.number().int().min(0),
@@ -147,6 +148,9 @@ export const productQuerySchema = z.object({
     maxPrice: z.coerce.number().min(0).optional(),
     ageGroup: z.enum(["0-3", "3-6", "6-12", "12+"]).optional(),
     material: z.string().trim().max(40).optional(),
+    colour: z.string().trim().max(30).optional(),
+    minRating: z.coerce.number().min(0).max(5).optional(),
+    inStock: z.enum(["true", "false"]).optional(),
     sort: z.enum(["price_asc", "price_desc", "newest", "rating"]).optional(),
     page: z.coerce.number().int().min(1).default(1),
     limit: z.coerce.number().int().min(1).max(50).default(12),
@@ -181,6 +185,12 @@ export const createOrderSchema = z.object({
     couponCode: z.string().trim().max(20).optional(),
     paymentMethod: z.enum(["cod", "razorpay"]).default("cod"),
     customerNotes: z.string().trim().max(500).optional(),
+    gift: z
+      .object({
+        isGift: z.boolean().default(false),
+        message: z.string().trim().max(200).optional().default(""),
+      })
+      .optional(),
   }),
 });
 
@@ -282,9 +292,157 @@ export const chatSchema = z.object({
   }),
 });
 
-// ---------- payments ----------
-export const verifyPaymentSchema = z.object({
+// ---------- shipping / pincode ----------
+export const pincodeCheckSchema = z.object({
+  params: z.object({ pincode: z.string().regex(/^\d{6}$/, "Enter a valid 6-digit pincode") }),
+});
+
+// ---------- wishlist ----------
+export const addToWishlistSchema = z.object({
+  body: z.object({ productId: objectId }),
+});
+
+export const wishlistParamsSchema = z.object({
+  params: z.object({ productId: objectId }),
+});
+
+// ---------- CMS blocks ----------
+export const cmsQuerySchema = z.object({
+  query: z.object({
+    section: z.enum(["announcement", "offer", "testimonial", "gallery"]).optional(),
+  }),
+});
+
+const cmsBlockFields = {
+  section: z.enum(["announcement", "offer", "testimonial", "gallery"]),
+  title: z.string().trim().max(120).optional(),
+  subtitle: z.string().trim().max(200).optional(),
+  content: z.string().trim().max(2000).optional(),
+  name: z.string().trim().max(60).optional(),
+  rating: z.number().min(1).max(5).optional(),
+  image: z.string().trim().max(500).optional(),
+  link: z.string().trim().max(500).optional(),
+  linkLabel: z.string().trim().max(40).optional(),
+  endsAt: z.coerce.date().optional(),
+  startsAt: z.coerce.date().optional(),
+  expiresAt: z.coerce.date().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+};
+
+export const createCmsBlockSchema = z.object({
+  body: z.object(cmsBlockFields),
+});
+
+export const updateCmsBlockSchema = z.object({
+  params: z.object({ bid: objectId }),
+  body: z.object(cmsBlockFields).partial(),
+});
+
+// ---------- newsletter ----------
+export const subscribeSchema = z.object({
   body: z.object({
+    email: z.string().trim().toLowerCase().email("Enter a valid email"),
+    source: z.string().trim().max(30).optional(),
+  }),
+});
+
+// ---------- analytics ----------
+export const analyticsQuerySchema = z.object({
+  query: z.object({
+    days: z.coerce.number().int().min(1).max(90).default(14),
+  }),
+});
+
+// ---------- reviews moderation (admin) ----------
+export const reviewAdminQuerySchema = z.object({
+  query: z.object({
+    approved: z.enum(["true", "false"]).optional(),
+    reported: z.enum(["true"]).optional(),
+  }),
+});
+
+export const moderateReviewSchema = z.object({
+  params: z.object({ rid: objectId }),
+  body: z.object({ isApproved: z.boolean() }),
+});
+
+export const replyReviewSchema = z.object({
+  params: z.object({ rid: objectId }),
+  body: z.object({ text: z.string().trim().min(1).max(1000) }),
+});
+
+// ---------- settings (admin allow-list) ----------
+export const updateSettingsSchema = z.object({
+  body: z
+    .object({
+      freeShippingThreshold: z.number().min(0).optional(),
+      shippingFee: z.number().min(0).optional(),
+      codMaxOrderValue: z.number().min(0).optional(),
+      giftWrapFee: z.number().min(0).optional(),
+      storeNotice: z.string().trim().max(300).optional(),
+    })
+    .refine((d) => Object.keys(d).length > 0, { message: "Provide at least one setting to update" }),
+});
+
+// ---------- support inbox ----------
+const supportPhone = z
+  .string()
+  .trim()
+  .regex(/^[6-9]\d{9}$/, "Enter a valid 10-digit Indian mobile number")
+  .optional();
+
+export const createSupportSchema = z.object({
+  body: z.object({
+    name: z.string().trim().min(2).max(50),
+    email: z.string().trim().toLowerCase().email("Enter a valid email"),
+    phone: supportPhone,
+    subject: z.string().trim().min(3).max(100),
+    message: z.string().trim().min(10).max(2000),
+  }),
+});
+
+export const supportAdminQuerySchema = z.object({
+  query: z.object({
+    status: z.enum(["new", "read", "replied", "closed"]).optional(),
+  }),
+});
+
+export const updateSupportSchema = z.object({
+  params: z.object({ mid: objectId }),
+  body: z
+    .object({
+      status: z.enum(["new", "read", "replied", "closed"]).optional(),
+      adminReply: z.string().trim().min(1).max(2000).optional(),
+    })
+    .refine((d) => Object.keys(d).length > 0, { message: "Provide status or adminReply to update" }),
+});
+
+// ---------- refunds / invoices / reports ----------
+export const orderIdParamsSchema = z.object({
+  params: z.object({ oid: objectId }),
+});
+
+export const refundOrderSchema = z.object({
+  params: z.object({ oid: objectId }),
+  body: z.object({
+    amount: z.number().positive().optional(),
+    reason: z.string().trim().max(500).optional(),
+  }),
+});
+
+export const reportParamsSchema = z.object({
+  params: z.object({
+    type: z.enum(["sales", "orders", "inventory", "customers", "newsletter"]),
+  }),
+  query: z.object({
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
+  }),
+});
+
+// ---------- payments ----------
+export const verifyPaymentSchema = z.object({  body: z.object({
     orderId: objectId,
     razorpayOrderId: z.string().min(1).max(40),
     razorpayPaymentId: z.string().min(1).max(40),

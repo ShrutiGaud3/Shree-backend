@@ -7,6 +7,7 @@ import { cancelOrderAndRelease } from "../utils/orderService.js";
 import { assertCouponUsable } from "../utils/coupon.js";
 import { notifyOrderStatus } from "../utils/orderEmails.js";
 import { createRazorpayOrder, isRazorpayConfigured } from "../utils/razorpay.js";
+import { getStoreSettings } from "../utils/storeSettings.js";
 
 // Checkout: totals always computed from DB prices (never trust frontend).
 // Stock is reserved atomically BEFORE the order is created; any failure
@@ -76,7 +77,7 @@ const buildItemsFromCart = (cart) => {
 
 const createOrder = async (req, res) => {
   const userId = req.user._id;
-  const { shippingAddress, couponCode, paymentMethod = "cod", customerNotes } = req.body;
+  const { shippingAddress, couponCode, paymentMethod = "cod", customerNotes, gift } = req.body;
 
   if (!shippingAddress?.line1 || !shippingAddress?.city || !shippingAddress?.pincode) {
     res.status(400);
@@ -112,12 +113,17 @@ const createOrder = async (req, res) => {
 
   const totalTaxable = subtotal - couponDiscount;
   const totalGst = items.reduce((s, i) => s + i.gstAmount * i.qty, 0);
-  const shippingFee = totalTaxable >= STORE_CONFIG.freeShippingThreshold ? 0 : STORE_CONFIG.shippingFee;
-  const totalAmount = Math.round((totalTaxable + totalGst + shippingFee) * 100) / 100;
+  // Effective thresholds/fees (static defaults until an admin overrides them)
+  const settings = await getStoreSettings();
+  const shippingFee = totalTaxable >= settings.freeShippingThreshold ? 0 : settings.shippingFee;
+  // Gift-wrap charge is fixed server-side (never trusted from the client)
+  const giftCharge = gift?.isGift ? settings.giftWrapFee : 0;
+  const giftMessage = gift?.isGift ? String(gift?.message || "").slice(0, 200) : "";
+  const totalAmount = Math.round((totalTaxable + totalGst + shippingFee + giftCharge) * 100) / 100;
 
-  if (paymentMethod === "cod" && totalAmount > STORE_CONFIG.codMaxOrderValue) {
+  if (paymentMethod === "cod" && totalAmount > settings.codMaxOrderValue) {
     res.status(400);
-    throw new Error(`COD allowed only below ₹${STORE_CONFIG.codMaxOrderValue}. Please pay online.`);
+    throw new Error(`COD allowed only below ₹${settings.codMaxOrderValue}. Please pay online.`);
   }
 
   // Atomic stock reserve (rolls back on any line failure)
@@ -136,6 +142,7 @@ const createOrder = async (req, res) => {
     coupon: coupon?._id || undefined,
     couponCode: coupon?.code,
     couponDiscount,
+    gift: { isGift: Boolean(gift?.isGift), message: giftMessage, charge: giftCharge },
     status: "placed",
     payment: { method: paymentMethod, status: "pending", amount: totalAmount, currency: "INR" },
     customerNotes,

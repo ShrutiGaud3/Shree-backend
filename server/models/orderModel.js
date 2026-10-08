@@ -145,6 +145,12 @@ const orderSchema = new mongoose.Schema(
     },
     couponCode: { type: String },
     couponDiscount: { type: Number, default: 0 },
+    // Gift wrap (optional; charge is computed on the server)
+    gift: {
+      isGift: { type: Boolean, default: false },
+      message: { type: String, trim: true, maxlength: 200, default: "" },
+      charge: { type: Number, default: 0, min: 0 },
+    },
     // Status
     status: {
       type: String,
