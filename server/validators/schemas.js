@@ -102,6 +102,7 @@ const baseProductFields = {
   jewelleryFields,
   gstRate: z.number().min(0).max(100).optional(),
   isReturnable: z.boolean().optional(),
+  guarantee: z.string().trim().max(500).optional(),
   isActive: z.boolean().optional(),
   isFeatured: z.boolean().optional(),
 };

@@ -11,6 +11,7 @@ import {
   deleteFromCloudinary,
   getPublicIdFromUrl,
 } from "../middleware/cloudinaryMiddleware.js";
+import { clearProductCache } from "./productController.js";
 
 // Single-vendor admin. Merged shop-owner functions (product + coupon + order updates).
 // Full CRUD validation (zod) + Cloudinary wiring lands in Phase 2/3.
@@ -110,6 +111,7 @@ const createProduct = async (req, res) => {
   const { images: _ignored, ...data } = req.body;
   const images = await uploadProductFiles(req.files || [], data.name || "");
   const product = await Product.create({ ...data, images });
+  clearProductCache();
   res.status(201).json(product);
 };
 
@@ -161,6 +163,7 @@ const updateProduct = async (req, res) => {
   }
 
   await product.save(); // runs validators + pre-save hooks
+  clearProductCache();
   res.status(200).json(product);
 };
 
@@ -171,6 +174,7 @@ const deleteProduct = async (req, res) => {
     res.status(404);
     throw new Error("Product not found");
   }
+  clearProductCache();
   res.status(200).json({ message: "Product deactivated", _id: updated._id });
 };
 

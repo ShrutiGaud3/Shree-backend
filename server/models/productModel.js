@@ -138,10 +138,14 @@ const productSchema = new mongoose.Schema(
       min: [0, "GST rate cannot be negative"],
       max: [100, "GST rate cannot exceed 100%"],
     },
-    // Return policy
+    // Return policy & Guarantee
     isReturnable: {
       type: Boolean,
       default: true,
+    },
+    guarantee: {
+      type: String,
+      default: "100% Quality & Authenticity Guarantee with 7-Day Easy Support",
     },
     // SEO
     metaTitle: { type: String, maxlength: [60, "Meta title cannot exceed 60 characters"] },
