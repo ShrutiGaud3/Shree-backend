@@ -102,9 +102,42 @@ const getProductsAdmin = async (req, res) => {
 };
 
 const uploadProductFiles = async (files = [], alt = "") => {
-  if (!files.length) return [];
-  const uploads = await Promise.all(files.map((f) => uploadToCloudinary(f.buffer, { folder: "shree/products" })));
-  return uploads.map((u, i) => ({ url: u.secure_url, publicId: u.public_id, alt, isPrimary: i === 0 }));
+  if (!files || !files.length) return [];
+
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+  const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
+  const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
+  const hasCloudinary = Boolean(cloudName && apiKey && apiSecret);
+
+  if (!hasCloudinary) {
+    // Graceful fallback to data URI when Cloudinary is not configured
+    return files.map((f, i) => ({
+      url: `data:${f.mimetype || "image/jpeg"};base64,${f.buffer.toString("base64")}`,
+      publicId: `local_${Date.now()}_${i}`,
+      alt: alt || "Product image",
+      isPrimary: i === 0,
+    }));
+  }
+
+  try {
+    const uploads = await Promise.all(
+      files.map((f) => uploadToCloudinary(f.buffer, { folder: "shree/products" }))
+    );
+    return uploads.map((u, i) => ({
+      url: u.secure_url,
+      publicId: u.public_id,
+      alt: alt || "Product image",
+      isPrimary: i === 0,
+    }));
+  } catch (err) {
+    console.warn("Cloudinary upload failed, falling back to data URL:", err.message);
+    return files.map((f, i) => ({
+      url: `data:${f.mimetype || "image/jpeg"};base64,${f.buffer.toString("base64")}`,
+      publicId: `local_${Date.now()}_${i}`,
+      alt: alt || "Product image",
+      isPrimary: i === 0,
+    }));
+  }
 };
 
 const createProduct = async (req, res) => {
@@ -147,12 +180,15 @@ const updateProduct = async (req, res) => {
   }
 
   // Remove images (accepts publicIds or full URLs) from Cloudinary + doc
-  if (removeImages?.length) {
-    const ids = removeImages.map((r) => (r.includes("http") ? getPublicIdFromUrl(r) : r)).filter(Boolean);
-    await Promise.allSettled(ids.map((id) => deleteFromCloudinary(id)));
-    product.images = product.images.filter(
-      (img) => !ids.includes(img.publicId) && !ids.includes(img.url)
-    );
+  if (removeImages) {
+    const list = Array.isArray(removeImages) ? removeImages : [removeImages];
+    if (list.length) {
+      const ids = list.map((r) => (typeof r === "string" && r.includes("http") ? getPublicIdFromUrl(r) : r)).filter(Boolean);
+      await Promise.allSettled(ids.map((id) => deleteFromCloudinary(id)));
+      product.images = product.images.filter(
+        (img) => !ids.includes(img.publicId) && !ids.includes(img.url) && !list.includes(img.url) && !list.includes(img.publicId)
+      );
+    }
   }
 
   Object.assign(product, updates);

@@ -129,7 +129,11 @@ export const createProductSchema = z.object({
 export const updateProductSchema = z.object({
   params: z.object({ pid: objectId }),
   body: z
-    .object({ ...baseProductFields, name: baseProductFields.name.optional() })
+    .object({
+      ...baseProductFields,
+      name: baseProductFields.name.optional(),
+      removeImages: z.union([z.array(z.string()), z.string()]).optional(),
+    })
     .partial()
     .refine(
       (data) => {

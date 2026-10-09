@@ -6,16 +6,20 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+const apiKey = process.env.CLOUDINARY_API_KEY?.trim();
+const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim();
+
 // Configuration from env
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
+  cloud_name: cloudName || "",
+  api_key: apiKey || "",
+  api_secret: apiSecret || "",
 });
 
 // Validate Cloudinary config on startup
-if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.warn("⚠️  Cloudinary credentials not fully configured");
+if (!cloudName || !apiKey || !apiSecret) {
+  console.warn("⚠️  Cloudinary credentials not fully configured — local image fallback will be used");
 }
 
 // Allowed image types
@@ -24,6 +28,14 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 // Upload buffer to Cloudinary
 export const uploadToCloudinary = async (buffer, options = {}) => {
+  const cName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+  const cKey = process.env.CLOUDINARY_API_KEY?.trim();
+  const cSec = process.env.CLOUDINARY_API_SECRET?.trim();
+
+  if (!cName || !cKey || !cSec) {
+    throw new Error("Cloudinary credentials not configured");
+  }
+
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
@@ -45,12 +57,18 @@ export const uploadToCloudinary = async (buffer, options = {}) => {
 
 // Delete image from Cloudinary by public_id
 export const deleteFromCloudinary = async (publicId) => {
+  if (!publicId || publicId.startsWith("local_")) return null;
+  const cName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+  const cKey = process.env.CLOUDINARY_API_KEY?.trim();
+  const cSec = process.env.CLOUDINARY_API_SECRET?.trim();
+  if (!cName || !cKey || !cSec) return null;
+
   try {
     const result = await cloudinary.uploader.destroy(publicId);
     return result;
   } catch (error) {
-    console.error("Cloudinary delete error:", error);
-    throw error;
+    console.warn("Cloudinary delete ignored/failed:", error?.message || error);
+    return null;
   }
 };
 
